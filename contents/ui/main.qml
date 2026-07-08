@@ -1,9 +1,10 @@
 import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls
-import org.kde.plasma.core 2.0 as PlasmaCore
+import org.kde.kirigami as Kirigami
+import org.kde.plasma.plasma5support as P5Support
 import org.kde.plasma.components 3.0 as PlasmaComponents3
-import org.kde.plasma.plasmoid 2.0
+import org.kde.plasma.plasmoid
 
 PlasmoidItem {
     id: root
@@ -16,9 +17,38 @@ PlasmoidItem {
     property string backendCommand: "python3 " + shellQuote(backendScript) + " --nonce " + refreshToken
     property string sortColumn: "ipDestino"
     property bool sortAscending: true
+    property bool autoRefreshEnabled: Plasmoid.configuration.autoRefreshEnabled === undefined ? true : Boolean(Plasmoid.configuration.autoRefreshEnabled)
+    property int refreshIntervalSeconds: {
+        const configured = Number(Plasmoid.configuration.refreshIntervalSeconds)
+        if (!isNaN(configured) && configured >= 5) {
+            return configured
+        }
+        return 20
+    }
+    property int colIpOrigenWidth: 140
+    property int colIpDestinoWidth: 170
+    property int colPuertoWidth: 80
+    property int colEmpresaWidth: 140
+    property int colPaisOrigenWidth: 100
+    property int colPaisDestinoWidth: 100
+    property int colProcesoWidth: 140
 
     ListModel {
         id: connectionsModel
+    }
+
+    Timer {
+        id: autoRefreshTimer
+        interval: root.refreshIntervalSeconds * 1000
+        repeat: true
+        running: root.autoRefreshEnabled
+        triggeredOnStart: false
+
+        onTriggered: {
+            if (!root.loading) {
+                root.refreshConnections()
+            }
+        }
     }
 
     function shellQuote(value) {
@@ -51,28 +81,78 @@ PlasmoidItem {
 
     function sortItems(items) {
         items.sort(function(left, right) {
-            var comparison = 0
-
-            if (sortColumn === "puerto") {
-                comparison = compareValues(Number(left.puertoDestino), Number(right.puertoDestino))
-            } else if (sortColumn === "estado") {
-                comparison = compareValues(left.estado, right.estado)
-            } else if (sortColumn === "proceso") {
-                comparison = compareValues(left.proceso, right.proceso)
-            } else if (sortColumn === "empresa") {
-                comparison = compareValues(left.empresa, right.empresa)
-            } else if (sortColumn === "paisOrigen") {
-                comparison = compareValues(left.paisOrigen, right.paisOrigen)
-            } else if (sortColumn === "paisDestino") {
-                comparison = compareValues(left.paisDestino, right.paisDestino)
-            } else {
-                comparison = compareValues(left.ipDestino, right.ipDestino)
-            }
+            var comparison = compareValues(getSortValue(left), getSortValue(right))
 
             return sortAscending ? comparison : -comparison
         })
 
         return items
+    }
+
+    function readField(item, camelKey, snakeKey) {
+        if (item[camelKey] !== undefined) {
+            return item[camelKey]
+        }
+        if (snakeKey !== "" && item[snakeKey] !== undefined) {
+            return item[snakeKey]
+        }
+        return ""
+    }
+
+    function getSortValue(item) {
+        if (sortColumn === "puerto") {
+            const portValue = readField(item, "puertoDestino", "puerto")
+            return Number(portValue)
+        }
+        if (sortColumn === "ipOrigen") {
+            return readField(item, "ipOrigen", "ip_origen")
+        }
+        if (sortColumn === "ipDestino") {
+            return readField(item, "ipDestino", "ip_destino")
+        }
+        if (sortColumn === "empresa") {
+            return readField(item, "empresa", "empresa")
+        }
+        if (sortColumn === "paisOrigen") {
+            return readField(item, "paisOrigen", "pais_origen")
+        }
+        if (sortColumn === "paisDestino") {
+            const country = readField(item, "paisDestino", "pais_destino")
+            if (country !== "") {
+                return country
+            }
+            return readField(item, "pais", "pais")
+        }
+        if (sortColumn === "proceso") {
+            return readField(item, "proceso", "proceso")
+        }
+        return readField(item, "ipDestino", "ip_destino")
+    }
+
+    function sortCurrentModel() {
+        const items = []
+        for (let i = 0; i < connectionsModel.count; ++i) {
+            const row = connectionsModel.get(i)
+            items.push({
+                ipOrigen: row.ipOrigen !== undefined && row.ipOrigen !== null ? row.ipOrigen : "",
+                ipDestino: row.ipDestino !== undefined && row.ipDestino !== null ? row.ipDestino : "",
+                puertoOrigen: row.puertoOrigen !== undefined && row.puertoOrigen !== null ? row.puertoOrigen : "",
+                puertoDestino: row.puertoDestino !== undefined && row.puertoDestino !== null ? row.puertoDestino : "",
+                empresa: row.empresa !== undefined && row.empresa !== null ? row.empresa : "",
+                paisOrigen: row.paisOrigen !== undefined && row.paisOrigen !== null ? row.paisOrigen : "",
+                paisDestino: row.paisDestino !== undefined && row.paisDestino !== null ? row.paisDestino : "",
+                proceso: row.proceso !== undefined && row.proceso !== null ? row.proceso : "",
+                procesoComando: row.procesoComando !== undefined && row.procesoComando !== null ? row.procesoComando : "",
+                pid: row.pid !== undefined && row.pid !== null ? Number(row.pid) : -1,
+                estado: row.estado !== undefined && row.estado !== null ? row.estado : ""
+            })
+        }
+
+        const sortedItems = sortItems(items)
+        connectionsModel.clear()
+        for (let j = 0; j < sortedItems.length; ++j) {
+            connectionsModel.append(sortedItems[j])
+        }
     }
 
     function toggleSort(columnName) {
@@ -83,7 +163,7 @@ PlasmoidItem {
             sortAscending = true
         }
 
-        refreshConnections()
+        sortCurrentModel()
     }
 
     function refreshConnections() {
@@ -104,14 +184,14 @@ PlasmoidItem {
             connectionsModel.append({
                 ipOrigen: item.ip_origen || "",
                 ipDestino: item.ip_destino || "",
-                puertoOrigen: item.puerto_origen !== undefined ? item.puerto_origen : "",
-                puertoDestino: item.puerto !== undefined ? item.puerto : "",
+                puertoOrigen: item.puerto_origen !== undefined && item.puerto_origen !== null ? item.puerto_origen : "",
+                puertoDestino: item.puerto !== undefined && item.puerto !== null ? item.puerto : "",
                 empresa: item.empresa || "",
                 paisOrigen: item.pais_origen || "",
                 paisDestino: item.pais_destino || item.pais || "",
                 proceso: item.proceso || "",
                 procesoComando: item.proceso_comando || "",
-                pid: item.pid !== undefined ? item.pid : "",
+                pid: item.pid !== undefined && item.pid !== null ? Number(item.pid) : -1,
                 estado: item.estado || ""
             })
         }
@@ -123,7 +203,7 @@ PlasmoidItem {
         implicitWidth: 28
         implicitHeight: 28
 
-        PlasmaCore.IconItem {
+        Kirigami.Icon {
             anchors.centerIn: parent
             width: 22
             height: 22
@@ -168,7 +248,7 @@ PlasmoidItem {
             PlasmaComponents3.Label {
                 text: errorMessage
                 visible: errorMessage.length > 0
-                color: PlasmaCore.Theme.negativeTextColor
+                color: Kirigami.Theme.negativeTextColor
                 wrapMode: Text.Wrap
                 Layout.fillWidth: true
             }
@@ -182,8 +262,8 @@ PlasmoidItem {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 radius: 10
-                color: PlasmaCore.Theme.backgroundColor
-                border.color: PlasmaCore.Theme.textColor
+                color: Kirigami.Theme.backgroundColor
+                border.color: Kirigami.Theme.textColor
                 border.width: 1
                 clip: true
 
@@ -195,7 +275,7 @@ PlasmoidItem {
                     Rectangle {
                         Layout.fillWidth: true
                         height: 34
-                        color: PlasmaCore.Theme.alternateBackgroundColor
+                        color: Kirigami.Theme.alternateBackgroundColor
                         radius: 6
 
                         GridLayout {
@@ -208,30 +288,37 @@ PlasmoidItem {
                             PlasmaComponents3.Button {
                                 text: sortColumn === "ipOrigen" ? "IP origen " + (sortAscending ? "▲" : "▼") : "IP origen"
                                 onClicked: root.toggleSort("ipOrigen")
+                                Layout.preferredWidth: root.colIpOrigenWidth
                             }
                             PlasmaComponents3.Button {
                                 text: sortColumn === "ipDestino" ? "IP destino " + (sortAscending ? "▲" : "▼") : "IP destino"
                                 onClicked: root.toggleSort("ipDestino")
+                                Layout.preferredWidth: root.colIpDestinoWidth
                             }
                             PlasmaComponents3.Button {
                                 text: sortColumn === "puerto" ? "Puerto " + (sortAscending ? "▲" : "▼") : "Puerto"
                                 onClicked: root.toggleSort("puerto")
+                                Layout.preferredWidth: root.colPuertoWidth
                             }
                             PlasmaComponents3.Button {
                                 text: sortColumn === "empresa" ? "Empresa " + (sortAscending ? "▲" : "▼") : "Empresa"
                                 onClicked: root.toggleSort("empresa")
+                                Layout.preferredWidth: root.colEmpresaWidth
                             }
                             PlasmaComponents3.Button {
                                 text: sortColumn === "paisOrigen" ? "País origen " + (sortAscending ? "▲" : "▼") : "País origen"
                                 onClicked: root.toggleSort("paisOrigen")
+                                Layout.preferredWidth: root.colPaisOrigenWidth
                             }
                             PlasmaComponents3.Button {
                                 text: sortColumn === "paisDestino" ? "País destino " + (sortAscending ? "▲" : "▼") : "País destino"
                                 onClicked: root.toggleSort("paisDestino")
+                                Layout.preferredWidth: root.colPaisDestinoWidth
                             }
                             PlasmaComponents3.Button {
                                 text: sortColumn === "proceso" ? "Proceso " + (sortAscending ? "▲" : "▼") : "Proceso"
                                 onClicked: root.toggleSort("proceso")
+                                Layout.preferredWidth: root.colProcesoWidth
                             }
                         }
                     }
@@ -251,7 +338,7 @@ PlasmoidItem {
                                 width: ListView.view.width
                                 height: 42
                                 radius: 6
-                                color: index % 2 === 0 ? PlasmaCore.Theme.backgroundColor : PlasmaCore.Theme.alternateBackgroundColor
+                                color: index % 2 === 0 ? Kirigami.Theme.backgroundColor : Kirigami.Theme.alternateBackgroundColor
 
                                 GridLayout {
                                     anchors.fill: parent
@@ -260,13 +347,48 @@ PlasmoidItem {
                                     rowSpacing: 0
                                     columnSpacing: 10
 
-                                    PlasmaComponents3.Label { text: ipOrigen; elide: Text.ElideRight; wrapMode: Text.NoWrap }
-                                    PlasmaComponents3.Label { text: ipDestino; elide: Text.ElideRight; wrapMode: Text.NoWrap }
-                                    PlasmaComponents3.Label { text: String(puertoDestino); elide: Text.ElideRight }
-                                    PlasmaComponents3.Label { text: empresa; elide: Text.ElideRight; wrapMode: Text.NoWrap }
-                                    PlasmaComponents3.Label { text: paisOrigen; elide: Text.ElideRight; wrapMode: Text.NoWrap }
-                                    PlasmaComponents3.Label { text: paisDestino; elide: Text.ElideRight; wrapMode: Text.NoWrap }
-                                    PlasmaComponents3.Label { text: proceso; elide: Text.ElideRight; wrapMode: Text.NoWrap }
+                                    PlasmaComponents3.Label {
+                                        text: ipOrigen
+                                        elide: Text.ElideRight
+                                        wrapMode: Text.NoWrap
+                                        Layout.preferredWidth: root.colIpOrigenWidth
+                                    }
+                                    PlasmaComponents3.Label {
+                                        text: ipDestino
+                                        elide: Text.ElideRight
+                                        wrapMode: Text.NoWrap
+                                        Layout.preferredWidth: root.colIpDestinoWidth
+                                    }
+                                    PlasmaComponents3.Label {
+                                        text: String(puertoDestino)
+                                        elide: Text.ElideRight
+                                        horizontalAlignment: Text.AlignHCenter
+                                        Layout.preferredWidth: root.colPuertoWidth
+                                    }
+                                    PlasmaComponents3.Label {
+                                        text: empresa
+                                        elide: Text.ElideRight
+                                        wrapMode: Text.NoWrap
+                                        Layout.preferredWidth: root.colEmpresaWidth
+                                    }
+                                    PlasmaComponents3.Label {
+                                        text: paisOrigen
+                                        elide: Text.ElideRight
+                                        wrapMode: Text.NoWrap
+                                        Layout.preferredWidth: root.colPaisOrigenWidth
+                                    }
+                                    PlasmaComponents3.Label {
+                                        text: paisDestino
+                                        elide: Text.ElideRight
+                                        wrapMode: Text.NoWrap
+                                        Layout.preferredWidth: root.colPaisDestinoWidth
+                                    }
+                                    PlasmaComponents3.Label {
+                                        text: proceso
+                                        elide: Text.ElideRight
+                                        wrapMode: Text.NoWrap
+                                        Layout.preferredWidth: root.colProcesoWidth
+                                    }
                                 }
                             }
                         }
@@ -276,7 +398,7 @@ PlasmoidItem {
         }
     }
 
-    PlasmaCore.DataSource {
+    P5Support.DataSource {
         id: execSource
         engine: "executable"
 

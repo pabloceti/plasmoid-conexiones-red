@@ -3,10 +3,11 @@
     "Id": "plasmoid-conexiones-red",
     "Name": "Conexiones de Red",
     "Description": "Muestra conexiones de red activas con whois y proceso",
-    "Version": "1.0",
+    "Version": "1.1",
     "License": "GPL-3.0-or-later",
     "Icon": "network-workgroup"
   },
+  "KPackageStructure": "Plasma/Applet",
   "X-Plasma-API": "declarativeappletscript",
-  "X-Plasma-MainScript": "ui/main.qml"
+  "X-Plasma-API-Minimum-Version": "6.0"
 }
